@@ -623,6 +623,12 @@ export async function dispatchInboundMessageWithBufferedDispatcher(params: {
       deliver,
       beforeDeliver,
       silentReplyContext: params.dispatcherOptions.silentReplyContext ?? silentReplyContext,
+      // AIDEV-NOTE: Hoist `disableBlockStreaming` from the incoming replyOptions
+      // so the dispatcher can no-op `sendBlockReply`. The channel-provided
+      // `dispatcherOptions.disableBlockStreaming` (if any) takes precedence.
+      disableBlockStreaming:
+        params.dispatcherOptions.disableBlockStreaming ??
+        params.replyOptions?.disableBlockStreaming,
     });
   markReplyPayloadSendingBeforeDeliverInstalled(dispatcher, replyPayloadBeforeDeliver);
   try {
@@ -687,6 +693,10 @@ export async function dispatchInboundMessageWithDispatcher(params: {
     ...params.dispatcherOptions,
     beforeDeliver: composedBeforeDeliver,
     silentReplyContext: params.dispatcherOptions.silentReplyContext ?? silentReplyContext,
+    // AIDEV-NOTE: mirror the hoist done in dispatchInboundMessageWithBufferedDispatcher
+    // so this non-buffered dispatch path honors the same gate.
+    disableBlockStreaming:
+      params.dispatcherOptions.disableBlockStreaming ?? params.replyOptions?.disableBlockStreaming,
   });
   markReplyPayloadSendingBeforeDeliverInstalled(dispatcher, replyPayloadBeforeDeliver);
   return await dispatchInboundMessage({

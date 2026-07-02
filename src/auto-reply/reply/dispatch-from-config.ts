@@ -3352,6 +3352,20 @@ export async function dispatchReplyFromConfig(
                 if (payload.isCommentary === true && !commentaryPayloadsEnabled) {
                   return;
                 }
+                // AIDEV-NOTE: `disableBlockStreaming` (channel setting e.g.
+                // `channels.slack.streaming.block.enabled=false`) suppresses
+                // plain assistant-text block payloads at emission time. This
+                // avoids the expensive normalize/TTS/accumulate work and
+                // prevents each inter-tool text block from becoming its own
+                // outbound message. Durable reasoning/commentary lanes stay on
+                // their own opt-in switches above so they aren't affected.
+                if (
+                  params.replyOptions?.disableBlockStreaming === true &&
+                  payload.isReasoning !== true &&
+                  payload.isCommentary !== true
+                ) {
+                  return;
+                }
                 // Accumulate block text for TTS generation after streaming.
                 // Exclude status notices — they are informational UI signals
                 // and must not be synthesised into the spoken reply. Display
