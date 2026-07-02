@@ -8112,6 +8112,78 @@ describe("dispatchReplyFromConfig", () => {
     expect(blockReplySentTexts).toContain("The answer is 42");
   });
 
+  it("suppresses inter-tool text-block replies when replyOptions.disableBlockStreaming is true", async () => {
+    // AIDEV-NOTE: Regression test for the inter-tool block-payload leak on
+    // channels that set `channels.<provider>.streaming.block.enabled=false`
+    // (Slack in production). Before the runtime-side gate in
+    // dispatch-from-config.ts, plain text blocks emitted between tool calls
+    // reached `dispatcher.sendBlockReply` even though the channel had opted
+    // out of block streaming entirely, producing one outbound message per
+    // block. The gate must let tool results and the final reply through
+    // unchanged.
+    setNoAbort();
+    const dispatcher = createDispatcher();
+    const ctx = buildTestCtx({ Provider: "slack" });
+    const blockReplySentTexts: string[] = [];
+    const replyResolver = async (
+      _ctx: MsgContext,
+      opts?: GetReplyOptions,
+    ): Promise<ReplyPayload> => {
+      await opts?.onBlockReply?.({ text: "inter-tool block one" });
+      await opts?.onBlockReply?.({ text: "inter-tool block two" });
+      return { text: "final answer" };
+    };
+    (dispatcher.sendBlockReply as ReturnType<typeof vi.fn>).mockImplementation(
+      (payload: ReplyPayload) => {
+        if (payload.text) {
+          blockReplySentTexts.push(payload.text);
+        }
+        return true;
+      },
+    );
+    await dispatchReplyFromConfig({
+      ctx,
+      cfg: emptyConfig,
+      dispatcher,
+      replyOptions: { disableBlockStreaming: true },
+      replyResolver,
+    });
+    expect(blockReplySentTexts).toEqual([]);
+    expect(dispatcher.sendFinalReply).toHaveBeenCalledWith({ text: "final answer" });
+  });
+
+  it("still delivers block replies when disableBlockStreaming is not set", async () => {
+    // Belt-and-suspenders: the default path (no flag) keeps existing behavior.
+    setNoAbort();
+    const dispatcher = createDispatcher();
+    const ctx = buildTestCtx({ Provider: "slack" });
+    const blockReplySentTexts: string[] = [];
+    const replyResolver = async (
+      _ctx: MsgContext,
+      opts?: GetReplyOptions,
+    ): Promise<ReplyPayload> => {
+      await opts?.onBlockReply?.({ text: "inter-tool block one" });
+      await opts?.onBlockReply?.({ text: "inter-tool block two" });
+      return { text: "final answer" };
+    };
+    (dispatcher.sendBlockReply as ReturnType<typeof vi.fn>).mockImplementation(
+      (payload: ReplyPayload) => {
+        if (payload.text) {
+          blockReplySentTexts.push(payload.text);
+        }
+        return true;
+      },
+    );
+    await dispatchReplyFromConfig({
+      ctx,
+      cfg: emptyConfig,
+      dispatcher,
+      replyResolver,
+    });
+    expect(blockReplySentTexts).toEqual(["inter-tool block one", "inter-tool block two"]);
+    expect(dispatcher.sendFinalReply).toHaveBeenCalledWith({ text: "final answer" });
+  });
+
   it("delivers opted-in block reasoning payloads without applying TTS", async () => {
     setNoAbort();
     const dispatcher = createDispatcher();

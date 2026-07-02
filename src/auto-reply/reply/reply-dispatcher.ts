@@ -110,6 +110,17 @@ export type ReplyDispatcherOptions = {
   onSkip?: ReplyDispatchSkipHandler;
   /** Human-like delay between block replies for natural rhythm. */
   humanDelay?: HumanDelayConfig;
+  /**
+   * When true, `sendBlockReply` is a no-op (returns false without enqueueing).
+   * Mirrors the channel-side gate for `channels.<provider>.streaming.block.enabled=false`:
+   * suppresses inter-tool assistant text blocks from becoming their own outbound
+   * messages while leaving tool results and final replies untouched.
+   *
+   * AIDEV-NOTE: Reasoning/commentary payloads travel their own channel-owned
+   * lanes and are gated separately by `reasoningPayloadsEnabled` /
+   * `commentaryPayloadsEnabled`; do not use this flag to suppress them.
+   */
+  disableBlockStreaming?: boolean;
   beforeDeliver?: ReplyDispatchBeforeDeliver;
   onBeforeDeliverCancelled?: ReplyDispatchCancelHandler;
   /** Observe each queued payload settling, including cancellation and delivery failure. */
@@ -317,7 +328,20 @@ export function createReplyDispatcher(options: ReplyDispatcherOptions): ReplyDis
 
   return {
     sendToolResult: (payload) => enqueue("tool", payload),
-    sendBlockReply: (payload) => enqueue("block", payload),
+    sendBlockReply: (payload) => {
+      // AIDEV-NOTE: dispatcher-level gate for `disableBlockStreaming`.
+      // The runtime already avoids emitting inter-tool block payloads in the
+      // streamed pipeline when `blockStreamingEnabled=false`, but plain
+      // (non-streamed) block deliveries reached this dispatcher unconditionally
+      // and produced one outbound `chat.postMessage` per inter-tool text block
+      // on Slack (see openclaw#23791 / #25592 for related regressions). Returning
+      // false here matches the "payload skipped before delivery" semantics that
+      // enqueue() already uses on normalization failure.
+      if (options.disableBlockStreaming === true) {
+        return false;
+      }
+      return enqueue("block", payload);
+    },
     sendFinalReply: (payload) => enqueue("final", payload),
     appendBeforeDeliver: (hook) => {
       const previousBeforeDeliver = beforeDeliver;
